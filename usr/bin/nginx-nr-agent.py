@@ -23,6 +23,9 @@ DEFAULT_POLL_INTERVAL = 60.0
 
 LOG = logging.getLogger('nginx-nr-agent')
 
+# TTY = '/dev/tty'
+TTY = '/proc/self/fd/2'
+
 class NginxStatusCollector(object):
 
     def __init__(self, section, name, url, poll_interval):
@@ -613,8 +616,8 @@ class MyDaemonRunner(runner.DaemonRunner):
 
             elif opt in ('-f', '--foreground'):
                 self.detach_process = False
-                self._app.stdout_path = '/dev/tty'
-                self._app.stderr_path = '/dev/tty'
+                self._app.stdout_path = TTY
+                self._app.stderr_path = TTY
                 self._app.foreground = True
 
             else:
