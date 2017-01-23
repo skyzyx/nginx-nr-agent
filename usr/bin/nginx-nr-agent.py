@@ -40,7 +40,13 @@ class NginxStatusCollector(object):
 
     def update_gauge(self, metric, units, value):
         self.gauges[metric] = value
-        self.unpushed.append({ 'metric': metric, 'value': value, 'units': units, 'timestamp': self.lastupdate })
+        self.unpushed.append({
+            'metric': metric,
+            'value': value,
+            'units': units,
+            'timestamp': self.lastupdate
+        })
+
         LOG.debug("update gauge %s: rv=%.2f", metric, value)
 
     def update_derive(self, metric, units, value):
@@ -56,16 +62,25 @@ class NginxStatusCollector(object):
 
         timedelta = float(time() - self.prevupdate) if self.prevupdate else float(self.poll_interval)
         rv = float(delta / timedelta)
-        self.unpushed.append({ 'metric': metric, 'value': rv, 'units': units, 'timestamp': self.lastupdate })
-        LOG.debug("update derive %s: pv=%d cv=%d rv=%.3f td=%.3f", metric,
-                  self.derives[metric], value, rv, timedelta)
+
+        self.unpushed.append({
+            'metric': metric,
+            'value': rv,
+            'units': units,
+            'timestamp': self.lastupdate
+        })
+
+        LOG.debug("update derive %s: pv=%d cv=%d rv=%.3f td=%.3f", metric, self.derives[metric], value, rv, timedelta)
+
         self.derives[metric] = value
         self.deltas[metric] = delta
 
     def get_status_data(self):
         r = Request(self.url)
+
         if self.basic_auth:
             r.add_header('Authorization', "Basic %s" % self.basic_auth)
+
         try:
             u = urlopen(r)
         except HTTPError as e:
@@ -74,8 +89,13 @@ class NginxStatusCollector(object):
         except URLError as e:
             LOG.error("request for %s failed: %s", self.url, e.reason)
             return None
+
         ct = u.info().getheader('Content-Type')
-        return {'content-type': ct, 'body': u.read()}
+
+        return {
+            'content-type': ct,
+            'body': u.read()
+        }
 
     def update_base_stats(self, stats):
         # conn/accepted, conn/dropped, conn/active, conn/idle, reqs/total, reqs/current
@@ -102,7 +122,9 @@ class NginxStatusCollector(object):
             for u in js['upstreams'].itervalues():
                 if js['version'] >= 6:
                     u_conn_keepalive += u['keepalive']
+
                 upeers = u if js['version'] < 6 else u['peers']
+
                 for us in upeers:
                     if us['state'] == 'up':
                         u_srv_up += 1
@@ -116,6 +138,7 @@ class NginxStatusCollector(object):
                     u_conn_active += us['active']
                     if js['version'] < 5:
                         u_conn_keepalive += us['keepalive']
+
                     u_reqs += us['requests']
                     u_resp += us['responses']['total']
                     u_resp_1xx += us['responses']['1xx']
@@ -245,6 +268,7 @@ class NginxStatusCollector(object):
 
             cache_resp_cached = cache_resp_hit + cache_resp_stale + cache_resp_updating + cache_resp_revalidated
             cache_resp_uncached = cache_resp_miss + cache_resp_expired + cache_resp_bypass
+
             if (cache_resp_cached + cache_resp_uncached) > 0:
                 cache_hit_ratio_long = (cache_resp_cached / float(cache_resp_cached + cache_resp_uncached)) * 100.0
                 self.update_gauge('cache/hitratio/long', 'Percent', cache_hit_ratio_long)
@@ -254,12 +278,14 @@ class NginxStatusCollector(object):
                                      self.deltas['cache/resp/updating'] + self.deltas['cache/resp/revalidated'])
                 cache_resp_uncached = (self.deltas['cache/resp/miss'] + self.deltas['cache/resp/expired'] +
                                        self.deltas['cache/resp/bypass'])
+
                 if (cache_resp_cached + cache_resp_uncached) > 0:
                     cache_hit_ratio_short = (cache_resp_cached / float(cache_resp_cached + cache_resp_uncached)) * 100.0
                     self.update_gauge('cache/hitratio/short', 'Percent', cache_hit_ratio_short)
 
     def process_stub_status(self, body):
         LOG.debug("processing stub status for %s", self.name)
+
         STUB_RE = re.compile(r'^Active connections: (?P<connections>\d+)\s+[\w ]+\n'
                   r'\s+(?P<accepts>\d+)'
                   r'\s+(?P<handled>\d+)'
@@ -268,9 +294,11 @@ class NginxStatusCollector(object):
                   r'\s+Writing:\s+(?P<writing>\d+)'
                   r'\s+Waiting:\s+(?P<waiting>\d+)')
         m = STUB_RE.match(body)
+
         if not m:
             LOG.error("could not parse stub status body (len=%d): '%s'", len(body), body)
             return False
+
         self.lastupdate = time()
         self.update_base_stats([
                 int(m.group('accepts')),
@@ -279,15 +307,18 @@ class NginxStatusCollector(object):
                 int(m.group('waiting')),
                 int(m.group('requests')),
                 int(m.group('reading')) + int(m.group('writing'))])
+
         return True
 
     def process_new_status(self, body):
         LOG.debug("processing new status for %s", self.name)
+
         try:
             js = json.loads(body)
         except ValueError, e:
             LOG.error("could not parse JSON from new status body: '%s'", body)
             return False
+
         self.lastupdate = time()
         self.update_base_stats([
                 js['connections']['accepted'],
@@ -297,14 +328,18 @@ class NginxStatusCollector(object):
                 js['requests']['total'],
                 js['requests']['current']])
         self.update_extended_stats(js)
+
         return True
 
     def poll(self):
         LOG.debug("getting data from %s (lastupdate=%.3f)", self.url, self.lastupdate)
+
         data = self.get_status_data()
+
         if data is None:
             LOG.error("get_status_data() returned nothing to process")
             return False
+
         if data['content-type'].startswith('text/plain'):
             rc = self.process_stub_status(data['body'])
         elif data['content-type'].startswith('application/json'):
@@ -312,7 +347,9 @@ class NginxStatusCollector(object):
         else:
             LOG.error("unknown Content-Type from %s: '%s'", self.url, data['content-type'])
             return False
+
         self.prevupdate = self.lastupdate
+
         return rc
 
 class NginxNewRelicAgent():
@@ -330,86 +367,91 @@ class NginxNewRelicAgent():
         self.license_key = None
         self.sources = []
         self.metric_names = {
-                'conn/accepted': [ 'Connections/Accepted' ],
-                'conn/dropped': [ 'Connections/Dropped' ],
-                'conn/active': [ 'Connections/Active', 'ConnSummary/Active' ],
-                'conn/idle': [ 'Connections/Idle', 'ConnSummary/Idle' ],
-                'reqs/total': [ 'Requests/Total' ],
-                'reqs/current': [ 'Requests/Current' ],
-                'upstream/servers/up': [ 'UpstreamServers/Up' ],
-                'upstream/servers/down': [ 'UpstreamServers/Down' ],
-                'upstream/servers/unavail': [ 'UpstreamServers/Unavailable' ],
-                'upstream/servers/unhealthy': [ 'UpstreamServers/Unhealthy' ],
-                'upstream/conn/active': [ 'UpstreamConnections/Active' ],
-                'upstream/conn/keepalive': [ 'UpstreamConnections/Keepalive' ],
-                'upstream/reqs': [ 'UpstreamReqsResp/Requests' ],
-                'upstream/resp': [ 'UpstreamReqsResp/Responses' ],
-                'upstream/resp/1xx': [ 'UpstreamResponses/1xx' ],
-                'upstream/resp/2xx': [ 'UpstreamResponses/2xx' ],
-                'upstream/resp/3xx': [ 'UpstreamResponses/3xx' ],
-                'upstream/resp/4xx': [ 'UpstreamResponses/4xx' ],
-                'upstream/resp/5xx': [ 'UpstreamResponses/5xx' ],
-                'upstream/traffic/sent': [ 'UpstreamTraffic/Sent' ],
-                'upstream/traffic/received': [ 'UpstreamTraffic/Received' ],
-                'upstream/server/fails': [ 'UpstreamMisc/ServerFails' ],
-                'upstream/server/unavails': [ 'UpstreamMisc/ServerUnavailable' ],
-                'upstream/hc/total': [ 'UpstreamMisc/HealthChecksTotal' ],
-                'upstream/hc/fails': [ 'UpstreamMisc/HealthChecksFails' ],
-                'upstream/hc/unhealthies': [ 'UpstreamMisc/HealthChecksUnhealthy' ],
-                'sz/processing': [ 'ServerZone/Processing' ],
-                'sz/requests': [ 'ServerZoneReqsResp/Requests' ],
-                'sz/resp': [ 'ServerZoneReqsResp/Responses' ],
-                'sz/resp/1xx': [ 'ServerZoneResponses/1xx' ],
-                'sz/resp/2xx': [ 'ServerZoneResponses/2xx' ],
-                'sz/resp/3xx': [ 'ServerZoneResponses/3xx' ],
-                'sz/resp/4xx': [ 'ServerZoneResponses/4xx' ],
-                'sz/resp/5xx': [ 'ServerZoneResponses/5xx' ],
-                'sz/sent': [ 'ServerZoneTraffic/Sent' ],
-                'sz/received': [ 'ServerZoneTraffic/Received' ],
-                'cache/hitratio/long': [ 'CacheHitRatio/Long' ],
-                'cache/hitratio/short': [ 'CacheHitRatio/Short' ],
-                'cache/size': [ 'CacheSize/Size' ],
-                'cache/max_size': [ 'CacheSize/MaxSize' ],
-                'cache/resp/hit': [ 'CachedResponses/Hit' ],
-                'cache/resp/stale': [ 'CachedResponses/Stale' ],
-                'cache/resp/updating': [ 'CachedResponses/Updating' ],
-                'cache/resp/revalidated': [ 'CachedResponses/Revalidated' ],
-                'cache/bytes/hit': [ 'CachedBytes/Hit' ],
-                'cache/bytes/stale': [ 'CachedBytes/Stale' ],
-                'cache/bytes/updating': [ 'CachedBytes/Updating' ],
-                'cache/bytes/revalidated': [ 'CachedBytes/Revalidated' ],
-                'cache/resp/miss': [ 'UncachedResponses/Miss' ],
-                'cache/resp/expired': [ 'UncachedResponses/Expired' ],
-                'cache/resp/bypass': [ 'UncachedResponses/Bypass' ],
-                'cache/bytes/miss': [ 'UncachedBytes/Miss' ],
-                'cache/bytes/expired': [ 'UncachedBytes/Expired' ],
-                'cache/bytes/bypass': [ 'UncachedBytes/Bypass' ],
-                'cache/resp_written/miss': [ 'UncachedResponsesWritten/Miss' ],
-                'cache/resp_written/expired': [ 'UncachedResponsesWritten/Expired' ],
-                'cache/resp_written/bypass': [ 'UncachedResponsesWritten/Bypass' ],
-                'cache/bytes_written/miss': [ 'UncachedBytesWritten/Miss' ],
-                'cache/bytes_written/expired': [ 'UncachedBytesWritten/Expired' ],
-                'cache/bytes_written/bypass': [ 'UncachedBytesWritten/Bypass' ]
+            'conn/accepted': [ 'Connections/Accepted' ],
+            'conn/dropped': [ 'Connections/Dropped' ],
+            'conn/active': [ 'Connections/Active', 'ConnSummary/Active' ],
+            'conn/idle': [ 'Connections/Idle', 'ConnSummary/Idle' ],
+            'reqs/total': [ 'Requests/Total' ],
+            'reqs/current': [ 'Requests/Current' ],
+            'upstream/servers/up': [ 'UpstreamServers/Up' ],
+            'upstream/servers/down': [ 'UpstreamServers/Down' ],
+            'upstream/servers/unavail': [ 'UpstreamServers/Unavailable' ],
+            'upstream/servers/unhealthy': [ 'UpstreamServers/Unhealthy' ],
+            'upstream/conn/active': [ 'UpstreamConnections/Active' ],
+            'upstream/conn/keepalive': [ 'UpstreamConnections/Keepalive' ],
+            'upstream/reqs': [ 'UpstreamReqsResp/Requests' ],
+            'upstream/resp': [ 'UpstreamReqsResp/Responses' ],
+            'upstream/resp/1xx': [ 'UpstreamResponses/1xx' ],
+            'upstream/resp/2xx': [ 'UpstreamResponses/2xx' ],
+            'upstream/resp/3xx': [ 'UpstreamResponses/3xx' ],
+            'upstream/resp/4xx': [ 'UpstreamResponses/4xx' ],
+            'upstream/resp/5xx': [ 'UpstreamResponses/5xx' ],
+            'upstream/traffic/sent': [ 'UpstreamTraffic/Sent' ],
+            'upstream/traffic/received': [ 'UpstreamTraffic/Received' ],
+            'upstream/server/fails': [ 'UpstreamMisc/ServerFails' ],
+            'upstream/server/unavails': [ 'UpstreamMisc/ServerUnavailable' ],
+            'upstream/hc/total': [ 'UpstreamMisc/HealthChecksTotal' ],
+            'upstream/hc/fails': [ 'UpstreamMisc/HealthChecksFails' ],
+            'upstream/hc/unhealthies': [ 'UpstreamMisc/HealthChecksUnhealthy' ],
+            'sz/processing': [ 'ServerZone/Processing' ],
+            'sz/requests': [ 'ServerZoneReqsResp/Requests' ],
+            'sz/resp': [ 'ServerZoneReqsResp/Responses' ],
+            'sz/resp/1xx': [ 'ServerZoneResponses/1xx' ],
+            'sz/resp/2xx': [ 'ServerZoneResponses/2xx' ],
+            'sz/resp/3xx': [ 'ServerZoneResponses/3xx' ],
+            'sz/resp/4xx': [ 'ServerZoneResponses/4xx' ],
+            'sz/resp/5xx': [ 'ServerZoneResponses/5xx' ],
+            'sz/sent': [ 'ServerZoneTraffic/Sent' ],
+            'sz/received': [ 'ServerZoneTraffic/Received' ],
+            'cache/hitratio/long': [ 'CacheHitRatio/Long' ],
+            'cache/hitratio/short': [ 'CacheHitRatio/Short' ],
+            'cache/size': [ 'CacheSize/Size' ],
+            'cache/max_size': [ 'CacheSize/MaxSize' ],
+            'cache/resp/hit': [ 'CachedResponses/Hit' ],
+            'cache/resp/stale': [ 'CachedResponses/Stale' ],
+            'cache/resp/updating': [ 'CachedResponses/Updating' ],
+            'cache/resp/revalidated': [ 'CachedResponses/Revalidated' ],
+            'cache/bytes/hit': [ 'CachedBytes/Hit' ],
+            'cache/bytes/stale': [ 'CachedBytes/Stale' ],
+            'cache/bytes/updating': [ 'CachedBytes/Updating' ],
+            'cache/bytes/revalidated': [ 'CachedBytes/Revalidated' ],
+            'cache/resp/miss': [ 'UncachedResponses/Miss' ],
+            'cache/resp/expired': [ 'UncachedResponses/Expired' ],
+            'cache/resp/bypass': [ 'UncachedResponses/Bypass' ],
+            'cache/bytes/miss': [ 'UncachedBytes/Miss' ],
+            'cache/bytes/expired': [ 'UncachedBytes/Expired' ],
+            'cache/bytes/bypass': [ 'UncachedBytes/Bypass' ],
+            'cache/resp_written/miss': [ 'UncachedResponsesWritten/Miss' ],
+            'cache/resp_written/expired': [ 'UncachedResponsesWritten/Expired' ],
+            'cache/resp_written/bypass': [ 'UncachedResponsesWritten/Bypass' ],
+            'cache/bytes_written/miss': [ 'UncachedBytesWritten/Miss' ],
+            'cache/bytes_written/expired': [ 'UncachedBytesWritten/Expired' ],
+            'cache/bytes_written/bypass': [ 'UncachedBytesWritten/Bypass' ]
         }
 
     def newrelic_push(self):
         components = []
         metrics_total = 0
+
         for ns in self.sources:
             if len(ns.unpushed) == 0:
                 continue
+
             LOG.debug("composing push data for %s (%d entries)", ns.name, len(ns.unpushed))
             component = dict()
             metrics = dict()
             component['guid'] = AGENT_GUID
             component['duration'] = self.poll_interval
             component['name'] = ns.name
+
             for m in ns.unpushed:
                 for mn in self.metric_names[m['metric']]:
                     metrics["Component/%s[%s]" % (mn, m['units'])] = m['value']
                     metrics_total += 1
+
             component['metrics'] = metrics
             components.append(component)
+
             del ns.unpushed[:]
 
         if len(components) == 0:
@@ -427,7 +469,7 @@ class NginxNewRelicAgent():
         r.add_header('Content-Type', 'application/json')
         r.add_header('Accept', 'application/json')
         r.add_header('User-Agent', "newrelic-nginx-agent/%s" % AGENT_VERSION)
-        r.add_header('X-License-Key', self.license_key)
+        r.add_header('X-License-Key', os.environ.get('NEWRELIC_LICENSE'))
 
         try:
             u = urlopen(r, data=json.dumps(payload))
@@ -456,11 +498,12 @@ class NginxNewRelicAgent():
             return False
 
         LOG.info("pushing finished successfully")
+
         return True
 
     def read_config(self):
-        if self.config:
-            return
+        # if self.config:
+        #     return
 
         config = ConfigParser.RawConfigParser()
         config.read(self.config_file)
@@ -472,12 +515,17 @@ class NginxNewRelicAgent():
                 if config.has_option(s, 'newrelic_license_key'):
                     self.license_key = config.get(s, 'newrelic_license_key')
                 continue
+
             if not config.has_option(s, 'name') or not config.has_option(s, 'url'):
                 continue
+
             ns = NginxStatusCollector(s, config.get(s, 'name'), config.get(s, 'url'), self.poll_interval)
+
             if config.has_option(s, 'http_user') and config.has_option(s, 'http_pass'):
                 ns.basic_auth = base64.b64encode(config.get(s, 'http_user') + b':' + config.get(s, 'http_pass'))
+
             self.sources.append(ns)
+
         self.config = config
 
     def configtest(self):
@@ -542,8 +590,7 @@ class MyDaemonRunner(runner.DaemonRunner):
             self.show_usage(0)
 
         try:
-            opts, args = getopt.getopt(sys.argv[1:], 'c:p:f',
-                                       ['config=', 'pidfile=', 'foreground'])
+            opts, args = getopt.getopt(sys.argv[1:], 'c:p:f', ['config=', 'pidfile=', 'foreground'])
         except getopt.GetoptError as e:
             print "Error: %s" % str(e)
             sys.exit(1)
@@ -552,6 +599,7 @@ class MyDaemonRunner(runner.DaemonRunner):
             self.show_usage(0)
 
         self.action = args[0]
+
         if self.action not in ('start', 'stop', 'configtest'):
             print "Invalid action: %s" % self.action
             self.show_usage(1)
@@ -575,10 +623,13 @@ class MyDaemonRunner(runner.DaemonRunner):
 
 def getLogFileHandles(logger):
     handles = []
+
     for handler in logger.handlers:
         handles.append(handler.stream.fileno())
+
     if logger.parent:
         handles += getLogFileHandles(logger.parent)
+
     return handles
 
 def main():
